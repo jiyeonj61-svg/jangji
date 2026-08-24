@@ -1,61 +1,166 @@
-# 장지연 워크캘린더
+# 장지연 워크캘린더 · PC/휴대폰 실시간 연동 버전
 
-Google Calendar처럼 한 달 일정을 한눈에 보고, 날짜별 업무를 등록·수정·삭제·완료 처리할 수 있는 정적 웹앱입니다.
+컴퓨터와 갤럭시폰에서 같은 계정으로 로그인하면 업무 등록·수정·삭제·완료 상태가 Supabase를 통해 실시간으로 반영되는 정적 웹앱입니다. GitHub와 Vercel로 배포할 수 있습니다.
 
-## 포함 기능
+## 이번 버전에서 추가된 기능
 
-- 월간 달력 / 오늘 이동 / 이전·다음 달 이동 / 월 직접 선택
-- 날짜 클릭 후 업무 등록
-- 업무명·날짜·구분·메모 저장
-- 업무별 체크 버튼
-- 완료 체크 즉시 초록색으로 변경
-- 업무 수정 및 삭제
-- 이번 달 전체·완료·남은 업무와 완료율 표시
-- 완료 업무 숨기기
-- JSON 백업 및 복원
-- 모바일 대응
-- 브라우저 `localStorage` 자동 저장
+- Supabase 이메일·비밀번호 로그인
+- PC와 휴대폰 실시간 업무 동기화
+- 사용자별 데이터 분리용 RLS 보안 정책
+- 업무 완료 체크 시 모든 기기에서 초록색으로 변경
+- 기존 로컬 저장 업무를 Supabase로 한 번에 이전
+- JSON 백업·복원
+- 갤럭시 홈 화면 설치용 PWA
+- 네트워크 상태 및 동기화 상태 표시
+- 오프라인 시 마지막 동기화 내용을 읽기 전용으로 표시
 
-## 가장 빠른 실행 방법
+---
 
-`index.html` 파일을 더블클릭하면 바로 실행됩니다.
+## 적용 전에 꼭 확인할 내용
 
-## GitHub에 올리는 방법
+기존 사이트에 업무가 들어 있다면 먼저 기존 페이지 상단의 **백업** 버튼을 눌러 JSON 파일을 저장해 두세요.
 
-1. GitHub에서 **New repository**를 누릅니다.
-2. 저장소 이름을 예: `jangjiyeon-work-calendar`로 입력합니다.
-3. **Create repository**를 누릅니다.
-4. 저장소 화면에서 **uploading an existing file**을 누릅니다.
-5. 이 폴더 안의 파일 전체를 드래그해서 올립니다.
-6. 아래 **Commit changes**를 누릅니다.
+기존 Vercel 도메인과 GitHub 저장소를 그대로 유지한 채 파일만 교체하면, 같은 브라우저에 있던 기존 업무를 자동으로 감지해 서버로 이전할 수 있습니다. 다른 도메인으로 새로 배포하면 자동 감지가 되지 않을 수 있으므로 JSON 백업 파일을 새 버전의 **복원** 버튼으로 불러오면 됩니다.
 
-## Vercel 배포 방법
+---
 
-1. Vercel에 로그인합니다.
-2. **Add New → Project**를 누릅니다.
-3. 방금 만든 GitHub 저장소를 선택하고 **Import**를 누릅니다.
-4. Framework Preset은 자동으로 `Other`가 선택되면 그대로 둡니다.
-5. Build Command, Output Directory, 환경변수는 입력하지 않습니다.
-6. **Deploy**를 누릅니다.
+## 1단계 · Supabase 데이터베이스 만들기
 
-## 데이터 저장 범위
+1. Supabase에 로그인합니다.
+2. **New project**를 눌러 프로젝트를 만듭니다.
+3. 프로젝트가 준비되면 왼쪽 메뉴에서 **SQL Editor**를 엽니다.
+4. **New query**를 누릅니다.
+5. 이 폴더의 `supabase-setup.sql` 내용을 전부 복사해 붙여넣습니다.
+6. 오른쪽 아래 **Run**을 누릅니다.
+7. 오류 없이 완료되면 `calendar_tasks` 테이블, 사용자별 보안 정책, Realtime 설정이 한 번에 생성됩니다.
 
-현재 버전은 입력한 업무를 브라우저 `localStorage`에 저장합니다.
+이미 다른 용도로 쓰는 Supabase 프로젝트가 있다면 같은 프로젝트에서 SQL을 실행해도 됩니다. 기존 테이블을 지우지 않고 `calendar_tasks`만 추가하도록 작성되어 있습니다.
 
-- 같은 기기·같은 브라우저: 새로고침하거나 다시 접속해도 유지
-- 다른 컴퓨터·다른 휴대폰·다른 브라우저: 자동 동기화되지 않음
-- 브라우저 데이터를 삭제하면 일정도 삭제될 수 있으므로 상단의 **백업** 기능을 이용하는 것이 안전
+---
 
-여러 기기에서 같은 업무를 실시간 공유하려면 다음 단계에서 Supabase 데이터베이스와 로그인 기능을 연결하면 됩니다.
+## 2단계 · Supabase 주소와 키 입력하기
 
-## 파일 구조
+Supabase 프로젝트에서 **Project Settings → API** 또는 **Connect** 화면으로 이동해 다음 값을 확인합니다.
+
+- Project URL
+- Publishable key 또는 legacy `anon public` key
+
+`supabase-config.js` 파일을 열어 아래 두 자리만 교체합니다.
+
+```js
+window.WORK_CALENDAR_CONFIG = Object.freeze({
+  supabaseUrl: "https://내프로젝트주소.supabase.co",
+  supabasePublishableKey: "내 Publishable key",
+});
+```
+
+> `service_role` 키는 관리자용 비밀키이므로 웹사이트 코드에 절대로 넣지 마세요.
+
+---
+
+## 3단계 · 로그인 리디렉션 주소 등록하기
+
+Supabase 왼쪽 메뉴에서 **Authentication → URL Configuration**으로 이동합니다.
+
+Vercel 주소가 아래와 같다고 가정하면:
 
 ```text
-jangjiyeon-work-calendar/
-├─ index.html
-├─ styles.css
+https://jangjiyeon-work-calendar.vercel.app
+```
+
+다음처럼 등록합니다.
+
+- **Site URL**: `https://jangjiyeon-work-calendar.vercel.app`
+- **Redirect URLs**: `https://jangjiyeon-work-calendar.vercel.app/**`
+
+개인 도메인을 사용한다면 개인 도메인도 Redirect URLs에 추가합니다.
+
+가입 직후 이메일 확인 과정 없이 바로 쓰고 싶다면 Supabase의 **Authentication → Providers → Email**에서 이메일 확인 설정을 해제할 수 있습니다. 보안을 더 중시하면 이메일 확인을 유지하세요.
+
+---
+
+## 4단계 · GitHub 파일 교체 후 Vercel 배포하기
+
+기존 GitHub 저장소에서 기존 파일을 삭제하거나 덮어쓴 뒤, 이 폴더 안의 파일과 폴더를 전부 업로드합니다.
+
+```text
+jangjiyeon-work-calendar-realtime/
+├─ icons/
+│  ├─ icon-192.png
+│  └─ icon-512.png
 ├─ app.js
 ├─ favicon.svg
-├─ vercel.json
-└─ README.md
+├─ index.html
+├─ manifest.webmanifest
+├─ README.md
+├─ styles.css
+├─ supabase-config.js
+├─ supabase-setup.sql
+├─ sw.js
+└─ vercel.json
 ```
+
+GitHub에서 **Commit changes**를 누르면 기존 Vercel 프로젝트가 자동으로 다시 배포됩니다. Framework Preset은 `Other`이며 Build Command, Output Directory, 환경변수는 필요하지 않습니다.
+
+배포 후 예전 화면이 계속 보이면:
+
+1. 페이지를 새로고침합니다.
+2. 그래도 같으면 브라우저를 완전히 종료했다가 다시 엽니다.
+3. 홈 화면 앱은 한 번 삭제한 뒤 다시 설치하면 가장 확실합니다.
+
+---
+
+## 5단계 · 컴퓨터와 갤럭시폰 연결하기
+
+1. 컴퓨터에서 배포 주소를 엽니다.
+2. **계정 만들기**를 눌러 이메일과 비밀번호를 등록합니다.
+3. 기존 업무 이전 창이 나오면 **기존 업무 연동하기**를 누릅니다.
+4. 갤럭시폰의 Chrome 또는 삼성 인터넷에서 같은 주소를 엽니다.
+5. 컴퓨터에서 만든 것과 **동일한 이메일·비밀번호**로 로그인합니다.
+6. 휴대폰 브라우저 메뉴에서 **홈 화면에 추가** 또는 **앱 설치**를 누릅니다.
+
+이후 컴퓨터에서 업무를 추가하면 휴대폰에 반영되고, 휴대폰에서 완료 체크하면 컴퓨터에서도 해당 업무가 초록색으로 바뀝니다.
+
+---
+
+## 정상 작동 확인 방법
+
+1. 컴퓨터와 휴대폰에서 같은 계정으로 로그인합니다.
+2. 두 기기의 상단 상태가 **실시간 연동 중**인지 확인합니다.
+3. 컴퓨터에서 테스트 업무를 하나 등록합니다.
+4. 휴대폰 화면에 업무가 나타나는지 확인합니다.
+5. 휴대폰에서 체크 버튼을 누릅니다.
+6. 컴퓨터에서 해당 업무가 초록색 완료 상태로 바뀌는지 확인합니다.
+
+---
+
+## 문제 해결
+
+### `Supabase 연결 설정이 필요합니다`가 표시될 때
+
+`supabase-config.js`에 실제 Project URL과 Publishable key가 입력되지 않았거나 GitHub에 수정 파일이 반영되지 않은 상태입니다.
+
+### 로그인은 되지만 업무를 저장할 수 없을 때
+
+Supabase SQL Editor에서 `supabase-setup.sql`을 다시 실행하고, `calendar_tasks` 테이블과 RLS 정책이 생성됐는지 확인하세요.
+
+### PC에서는 보이는데 휴대폰에서는 안 보일 때
+
+두 기기가 같은 이메일 계정으로 로그인했는지 먼저 확인하세요. 서로 다른 이메일이면 각자의 캘린더가 표시됩니다.
+
+### 상태가 `실시간 연결 재시도 중`으로 나올 때
+
+인터넷 연결을 확인한 뒤 페이지를 새로고침하세요. 계속 발생하면 Supabase Dashboard에서 `calendar_tasks`가 Realtime publication에 포함됐는지 확인합니다. 제공된 SQL을 다시 실행하면 중복 없이 설정을 재확인합니다.
+
+### 기존 업무 이전 창이 나오지 않을 때
+
+예전 사이트와 다른 도메인 또는 다른 브라우저에서 접속했을 가능성이 큽니다. 기존 사이트에서 JSON 백업을 내려받은 뒤 새 사이트의 **복원** 버튼으로 불러오세요.
+
+---
+
+## 보안 구조
+
+- 로그인한 사용자만 업무 테이블을 사용할 수 있습니다.
+- 각 사용자는 자신의 `user_id`와 일치하는 업무만 조회·등록·수정·삭제할 수 있습니다.
+- Publishable/anon key는 브라우저에서 사용하는 공개 키이며, 실제 데이터 접근 제한은 Supabase Auth와 RLS 정책이 담당합니다.
+- `service_role` 키는 모든 보안 정책을 우회할 수 있으므로 프런트엔드에 넣으면 안 됩니다.
