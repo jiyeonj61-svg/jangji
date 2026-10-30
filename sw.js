@@ -1,10 +1,13 @@
 /* 장지연 워크캘린더 PWA 서비스 워커 */
-const CACHE_NAME = "jangjiyeon-work-calendar-v2.1.0";
+const CACHE_NAME = "jangjiyeon-work-calendar-v3.0.0";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
+  "./calendar-layout.js",
+  "./goals.js",
+  "./goals.css",
   "./supabase-config.js",
   "./favicon.svg",
   "./manifest.webmanifest",

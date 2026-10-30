@@ -13,6 +13,7 @@
     <link rel="apple-touch-icon" href="./icons/icon-192.png" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./goals.css" />
   </head>
   <body>
     <section class="auth-screen" id="authScreen" aria-label="워크캘린더 로그인">
@@ -148,6 +149,8 @@
         </div>
       </header>
 
+      <section id="goalsPanel" aria-label="연간 및 월간 목표"></section>
+
       <section class="status-strip" aria-label="이번 달 업무 현황">
         <div class="status-left">
           <div class="status-item">
@@ -237,13 +240,28 @@
           <p class="field-error" id="taskTitleError" role="alert"></p>
         </div>
 
-        <div class="form-row">
+        <fieldset class="date-mode-field">
+          <legend>일정 기간</legend>
+          <div class="date-mode-options">
+            <label><input type="radio" name="dateMode" value="single" checked /> 단일 날짜</label>
+            <label><input type="radio" name="dateMode" value="range" /> 연속 날짜</label>
+          </div>
+        </fieldset>
+
+        <div class="form-row date-fields">
           <div class="form-field">
-            <label for="taskDate">날짜 <span aria-hidden="true">*</span></label>
+            <label for="taskDate"><span id="taskDateLabel">날짜</span> <span aria-hidden="true">*</span></label>
             <input id="taskDate" name="taskDate" type="date" required />
             <p class="field-error" id="taskDateError" role="alert"></p>
           </div>
-
+          <div class="form-field hidden" id="taskEndDateField">
+            <label for="taskEndDate">종료일 <span aria-hidden="true">*</span></label>
+            <input id="taskEndDate" name="taskEndDate" type="date" aria-describedby="taskEndDateError" />
+            <p class="field-error" id="taskEndDateError" role="alert"></p>
+          </div>
+        </div>
+        <p class="date-range-hint hidden" id="dateRangeHint">시작일부터 종료일까지 하나의 일정으로 이어서 표시됩니다.</p>
+        <div class="form-row">
           <div class="form-field">
             <label for="taskCategory">구분</label>
             <select id="taskCategory" name="taskCategory">
@@ -322,6 +340,8 @@
 
     <script src="./supabase-config.js" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js" defer></script>
+    <script src="./calendar-layout.js" defer></script>
+    <script src="./goals.js" defer></script>
     <script src="./app.js" defer></script>
   </body>
 </html>

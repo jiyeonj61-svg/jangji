@@ -7,7 +7,7 @@
   const MIGRATION_KEY_PREFIX = "jangjiyeon-work-calendar.migration.v2.";
   const TABLE_NAME = "calendar_tasks";
   const VALID_CATEGORIES = new Set(["work", "meeting", "deadline", "personal"]);
-  const TASK_SELECT = "id,user_id,title,task_date,category,memo,completed,created_at,updated_at";
+  const TASK_SELECT = "id,user_id,title,task_date,end_date,category,memo,completed,created_at,updated_at";
 
   const elements = {
     authScreen: document.querySelector("#authScreen"),
@@ -54,6 +54,12 @@
     taskId: document.querySelector("#taskId"),
     taskTitle: document.querySelector("#taskTitle"),
     taskDate: document.querySelector("#taskDate"),
+    taskDateLabel: document.querySelector("#taskDateLabel"),
+    taskEndDate: document.querySelector("#taskEndDate"),
+    taskEndDateField: document.querySelector("#taskEndDateField"),
+    taskEndDateError: document.querySelector("#taskEndDateError"),
+    dateRangeHint: document.querySelector("#dateRangeHint"),
+    dateModes: document.querySelectorAll('input[name="dateMode"]'),
     taskCategory: document.querySelector("#taskCategory"),
     taskMemo: document.querySelector("#taskMemo"),
     taskCompleted: document.querySelector("#taskCompleted"),
@@ -79,6 +85,7 @@
     legacyTasks: loadLegacyTasks(),
     settings: loadSettings(),
     supabase: null,
+    goals: null,
     session: null,
     user: null,
     realtimeChannel: null,
@@ -117,6 +124,8 @@
     state.supabase = window.supabase.createClient(config.supabaseUrl, config.supabasePublishableKey, {
       auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
     });
+    state.goals = window.WorkCalendarGoals.create({ supabase: state.supabase, showToast, canWrite: canWriteToServer });
+    state.goals.setMonth(state.visibleMonth);
 
     state.supabase.auth.onAuthStateChange((event, session) => {
       window.setTimeout(() => void handleAuthStateChange(event, session), 0);
@@ -157,7 +166,12 @@
     elements.taskDialog.addEventListener("click", handleDialogBackdropClick);
     elements.taskDialog.addEventListener("close", resetTaskForm);
     elements.taskTitle.addEventListener("input", () => clearFieldError("title"));
-    elements.taskDate.addEventListener("input", () => clearFieldError("date"));
+    elements.taskDate.addEventListener("input", () => {
+      clearFieldError("date");
+      elements.taskEndDate.min = elements.taskDate.value;
+    });
+    elements.taskEndDate.addEventListener("input", () => clearFieldError("endDate"));
+    elements.dateModes.forEach((input) => input.addEventListener("change", updateDateMode));
     elements.migrateTasksButton.addEventListener("click", migrateLegacyTasks);
     elements.skipMigrationButton.addEventListener("click", dismissMigrationForSession);
     window.addEventListener("keydown", handleKeyboardShortcuts);
@@ -291,6 +305,7 @@
     const sameUser = state.user?.id === userId;
     state.session = session;
     state.user = session.user;
+    state.goals?.setUser(session.user);
     elements.userEmail.textContent = session.user.email || "로그인 계정";
     hideAuthScreen();
 
@@ -308,6 +323,7 @@
 
   function leaveAuthenticatedState() {
     unsubscribeFromRealtime();
+    state.goals?.clear();
     state.session = null;
     state.user = null;
     state.tasks = [];
@@ -423,6 +439,7 @@
     renderMonthHeader();
     renderCalendar();
     renderMonthlySummary();
+    state.goals?.setMonth(state.visibleMonth);
   }
 
   function renderMonthHeader() {
@@ -439,7 +456,15 @@
     const gridStartDate = addDays(firstDayOfMonth, -firstDayOfMonth.getDay());
     const fragment = document.createDocumentFragment();
 
-    for (let index = 0; index < 42; index += 1) {
+    for (let weekIndex = 0; weekIndex < 6; weekIndex += 1) {
+      const week = document.createElement("div");
+      week.className = "calendar-week";
+      const days = document.createElement("div");
+      days.className = "week-days";
+      const dates = Array.from({ length: 7 }, (_, day) => formatDateKey(addDays(gridStartDate, weekIndex * 7 + day)));
+      const layout = window.CalendarLayout.layoutWeek(state.tasks, dates, state.settings.hideCompleted);
+      for (let day = 0; day < 7; day += 1) {
+      const index = weekIndex * 7 + day;
       const date = addDays(gridStartDate, index);
       const dateKey = formatDateKey(date);
       const cell = elements.dayCellTemplate.content.firstElementChild.cloneNode(true);
@@ -462,17 +487,28 @@
       addButton.dataset.action = "add-task";
       addButton.dataset.date = dateKey;
 
-      const dayTasks = getTasksForDate(dateKey);
-      const visibleTasks = state.settings.hideCompleted ? dayTasks.filter((task) => !task.completed) : dayTasks;
-      if (visibleTasks.length === 0) {
+      const hasTasks = layout.segments.some((segment) => day >= segment.start && day <= segment.end);
+      if (!hasTasks) {
         const hint = document.createElement("p");
         hint.className = "empty-day-hint";
         hint.textContent = "클릭하여 업무 추가";
         taskList.append(hint);
-      } else {
-        visibleTasks.forEach((task) => taskList.append(createTaskChip(task)));
       }
-      fragment.append(cell);
+      days.append(cell);
+      }
+      const events = document.createElement("div");
+      events.className = "week-events";
+      for (const segment of layout.segments) {
+        const chip = createTaskChip(segment.task);
+        chip.style.gridColumn = `${segment.start + 1} / ${segment.end + 2}`;
+        chip.style.gridRow = String(segment.lane + 1);
+        chip.classList.toggle("range-task", Boolean(segment.task.endDate));
+        chip.classList.toggle("continues-before", segment.continuesBefore);
+        chip.classList.toggle("continues-after", segment.continuesAfter);
+        events.append(chip);
+      }
+      week.append(days, events);
+      fragment.append(week);
     }
     elements.calendarGrid.append(fragment);
   }
@@ -500,7 +536,9 @@
     contentButton.dataset.action = "edit-task";
     contentButton.dataset.taskId = task.id;
     contentButton.disabled = pending;
-    contentButton.title = task.memo ? `${task.title}\n${task.memo}` : task.title;
+    const period = task.endDate ? `${task.date} ~ ${task.endDate}` : task.date;
+    contentButton.title = `${task.title}\n${period}${task.memo ? `\n${task.memo}` : ""}`;
+    contentButton.setAttribute("aria-label", `${task.title}, ${period}, 수정`);
     const title = document.createElement("span");
     title.textContent = task.title;
     contentButton.append(title);
@@ -509,8 +547,9 @@
   }
 
   function renderMonthlySummary() {
-    const monthPrefix = `${state.visibleMonth.getFullYear()}-${String(state.visibleMonth.getMonth() + 1).padStart(2, "0")}-`;
-    const monthTasks = state.tasks.filter((task) => task.date.startsWith(monthPrefix));
+    const monthStart = formatDateKey(state.visibleMonth);
+    const monthEnd = formatDateKey(new Date(state.visibleMonth.getFullYear(), state.visibleMonth.getMonth() + 1, 0));
+    const monthTasks = state.tasks.filter((task) => window.CalendarLayout.overlaps(task, monthStart, monthEnd));
     const completedCount = monthTasks.filter((task) => task.completed).length;
     const remainingCount = monthTasks.length - completedCount;
     const rate = monthTasks.length === 0 ? 0 : Math.round((completedCount / monthTasks.length) * 100);
@@ -547,6 +586,7 @@
       elements.taskId.value = task.id;
       elements.taskTitle.value = task.title;
       elements.taskDate.value = task.date;
+      elements.taskEndDate.value = task.endDate || task.date;
       elements.taskCategory.value = task.category;
       elements.taskMemo.value = task.memo;
       elements.taskCompleted.checked = task.completed;
@@ -557,11 +597,14 @@
       elements.taskId.value = "";
       elements.taskTitle.value = "";
       elements.taskDate.value = date || getPreferredNewTaskDate();
+      elements.taskEndDate.value = elements.taskDate.value;
       elements.taskCategory.value = "work";
       elements.taskMemo.value = "";
       elements.taskCompleted.checked = false;
       elements.deleteTaskButton.classList.add("hidden");
     }
+    elements.dateModes.forEach((input) => { input.checked = input.value === (task?.endDate ? "range" : "single"); });
+    updateDateMode();
     if (typeof elements.taskDialog.showModal === "function") elements.taskDialog.showModal();
     else elements.taskDialog.setAttribute("open", "");
     window.setTimeout(() => elements.taskTitle.focus(), 40);
@@ -580,6 +623,17 @@
     elements.taskId.value = "";
     clearAllFieldErrors();
     setTaskFormBusy(false);
+    updateDateMode();
+  }
+
+  function updateDateMode() {
+    const isRange = elements.taskForm.querySelector('input[name="dateMode"]:checked')?.value === "range";
+    elements.taskDateLabel.textContent = isRange ? "시작일" : "날짜";
+    elements.taskEndDateField.classList.toggle("hidden", !isRange);
+    elements.dateRangeHint.classList.toggle("hidden", !isRange);
+    elements.taskEndDate.required = isRange;
+    elements.taskEndDate.min = elements.taskDate.value;
+    clearFieldError("endDate");
   }
 
   function handleDialogBackdropClick(event) {
@@ -596,12 +650,18 @@
 
     const title = elements.taskTitle.value.trim();
     const date = elements.taskDate.value;
+    const isRange = elements.taskForm.querySelector('input[name="dateMode"]:checked')?.value === "range";
+    const endDate = isRange ? elements.taskEndDate.value : null;
     const category = VALID_CATEGORIES.has(elements.taskCategory.value) ? elements.taskCategory.value : "work";
     const memo = elements.taskMemo.value.trim();
     const completed = elements.taskCompleted.checked;
     let valid = true;
     if (!title) { setFieldError("title", "업무명을 입력해 주세요."); valid = false; }
     if (!isValidDateKey(date)) { setFieldError("date", "날짜를 선택해 주세요."); valid = false; }
+    if (isRange && (!isValidDateKey(endDate) || endDate < date)) {
+      setFieldError("endDate", "종료일은 시작일과 같거나 이후 날짜로 선택해 주세요.");
+      valid = false;
+    }
     if (!valid) return;
 
     const existingTaskId = elements.taskId.value;
@@ -614,7 +674,7 @@
       if (existingTaskId) {
         result = await state.supabase
           .from(TABLE_NAME)
-          .update({ title, task_date: date, category, memo, completed, updated_at: now })
+          .update({ title, task_date: date, end_date: endDate, category, memo, completed, updated_at: now })
           .eq("id", existingTaskId)
           .eq("user_id", state.user.id)
           .select(TASK_SELECT)
@@ -622,7 +682,7 @@
       } else {
         result = await state.supabase
           .from(TABLE_NAME)
-          .insert({ id: createId(), user_id: state.user.id, title, task_date: date, category, memo, completed, created_at: now, updated_at: now })
+          .insert({ id: createId(), user_id: state.user.id, title, task_date: date, end_date: endDate, category, memo, completed, created_at: now, updated_at: now })
           .select(TASK_SELECT)
           .single();
       }
@@ -763,7 +823,7 @@
     const activeTag = document.activeElement?.tagName?.toLowerCase();
     const isTyping = ["input", "textarea", "select"].includes(activeTag);
     if (event.key === "Escape" && elements.taskDialog.open) return closeTaskDialog();
-    if (isTyping || elements.taskDialog.open || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (isTyping || document.querySelector('dialog[open]') || event.ctrlKey || event.metaKey || event.altKey) return;
     if (event.key.toLowerCase() === "n" && state.user) { event.preventDefault(); openTaskDialog({ date: getPreferredNewTaskDate() }); }
     if (event.key === "ArrowLeft") { event.preventDefault(); changeMonth(-1); }
     if (event.key === "ArrowRight") { event.preventDefault(); changeMonth(1); }
@@ -772,10 +832,11 @@
   function exportTasks() {
     const exportData = {
       app: "장지연 워크캘린더",
-      version: 2,
+      version: 3,
       storage: "Supabase realtime",
       exportedAt: new Date().toISOString(),
       tasks: state.tasks,
+      goals: state.goals?.exportGoals() || [],
     };
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -795,21 +856,27 @@
     if (!file || !canWriteToServer()) return;
     try {
       const parsed = JSON.parse(await file.text());
-      const candidates = Array.isArray(parsed) ? parsed : parsed.tasks;
+      const candidates = Array.isArray(parsed) ? parsed : (parsed.tasks || []);
       if (!Array.isArray(candidates)) throw new Error("업무 목록이 없습니다.");
       const importedTasks = candidates.map(normaliseTask).filter(Boolean);
-      if (importedTasks.length === 0) throw new Error("복원할 업무가 없습니다.");
-      if (!window.confirm(`백업 파일에서 ${importedTasks.length}개의 업무를 찾았습니다.\n현재 서버 업무에 병합할까요?`)) return;
+      if (importedTasks.length !== candidates.length) throw new Error("올바르지 않은 업무가 포함되어 있습니다.");
+      const goalRows = Array.isArray(parsed) ? [] : (parsed.goals || []);
+      if (!Array.isArray(goalRows)) throw new Error("목표 목록 형식이 올바르지 않습니다.");
+      if (!importedTasks.length && !goalRows.length) throw new Error("복원할 내용이 없습니다.");
+      if (!window.confirm(`백업 파일에서 업무 ${importedTasks.length}개, 목표 ${goalRows.length}개를 찾았습니다.\n현재 서버 내용에 병합할까요?`)) return;
       setSyncStatus("syncing", "백업 복원 중");
       const rows = importedTasks.map((task) => toDatabaseTask(task, state.user.id));
-      const { error } = await state.supabase.from(TABLE_NAME).upsert(rows, { onConflict: "id" });
-      if (error) throw error;
+      if (rows.length) {
+        const { error } = await state.supabase.from(TABLE_NAME).upsert(rows, { onConflict: "id" });
+        if (error) throw error;
+      }
+      await state.goals.importGoals(goalRows);
       await loadTasksFromServer({ showErrorToast: false });
-      showToast(`${importedTasks.length}개의 업무를 서버에 병합했습니다.`, "success");
+      showToast(`업무 ${importedTasks.length}개와 목표 ${goalRows.length}개를 복원했습니다.`, "success");
     } catch (error) {
       console.error(error);
       setSyncStatus("error", "복원 실패");
-      showToast("백업 파일을 복원하지 못했습니다.", "error");
+      showToast("복원을 완료하지 못했습니다. 일부 항목은 저장되었을 수 있으니 확인 후 다시 시도해 주세요.", "error");
     }
   }
 
@@ -938,6 +1005,7 @@
       id: row?.id,
       title: row?.title,
       date: row?.task_date,
+      endDate: row?.end_date,
       category: row?.category,
       memo: row?.memo,
       completed: row?.completed,
@@ -952,6 +1020,7 @@
       user_id: userId,
       title: task.title,
       task_date: task.date,
+      end_date: task.endDate || null,
       category: task.category,
       memo: task.memo,
       completed: task.completed,
@@ -965,6 +1034,8 @@
     const title = String(candidate.title ?? "").trim().slice(0, 80);
     const date = String(candidate.date ?? candidate.task_date ?? "");
     if (!title || !isValidDateKey(date)) return null;
+    const rawEndDate = candidate.endDate ?? candidate.end_date ?? null;
+    if (rawEndDate && (!isValidDateKey(rawEndDate) || rawEndDate < date)) return null;
     const now = new Date().toISOString();
     const created = candidate.createdAt ?? candidate.created_at;
     const updated = candidate.updatedAt ?? candidate.updated_at;
@@ -972,6 +1043,7 @@
       id: String(candidate.id || createId()),
       title,
       date,
+      endDate: rawEndDate || null,
       category: VALID_CATEGORIES.has(candidate.category) ? candidate.category : "work",
       memo: String(candidate.memo ?? "").trim().slice(0, 500),
       completed: Boolean(candidate.completed),
@@ -991,16 +1063,23 @@
       elements.taskDateError.textContent = message;
       if (!elements.taskTitleError.textContent) elements.taskDate.focus();
     }
+    if (field === "endDate") {
+      elements.taskEndDate.classList.add("invalid");
+      elements.taskEndDateError.textContent = message;
+      if (!elements.taskTitleError.textContent && !elements.taskDateError.textContent) elements.taskEndDate.focus();
+    }
   }
 
   function clearFieldError(field) {
     if (field === "title") { elements.taskTitle.classList.remove("invalid"); elements.taskTitleError.textContent = ""; }
     if (field === "date") { elements.taskDate.classList.remove("invalid"); elements.taskDateError.textContent = ""; }
+    if (field === "endDate") { elements.taskEndDate.classList.remove("invalid"); elements.taskEndDateError.textContent = ""; }
   }
 
   function clearAllFieldErrors() {
     clearFieldError("title");
     clearFieldError("date");
+    clearFieldError("endDate");
   }
 
   function showToast(message, type = "success") {
